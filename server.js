@@ -14,11 +14,18 @@ const spotifyRoutes = require('./routes/spotifyRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// ========== FIXED CORS CONFIGURATION ==========
+// ========== FIXED CORS CONFIGURATION (NO '*' ROUTE) ==========
 const allowedOrigins = [
+    'http://localhost:5500',
+    'http://127.0.0.1:5500',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://atp1810.github.io',
+    'https://atp1810.github.io',
     process.env.FRONTEND_URL
-].filter(Boolean); // Remove undefined values
+].filter(Boolean);
 
+// CORS middleware - handles both preflight and actual requests
 app.use(cors({
     origin: function(origin, callback) {
         // Allow requests with no origin (like mobile apps, curl, etc)
@@ -27,7 +34,6 @@ app.use(cors({
         // Check if origin is allowed
         const isAllowed = allowedOrigins.some(allowed => {
             if (!allowed) return false;
-            // Exact match or starts with (for subpaths)
             return origin === allowed || origin.startsWith(allowed);
         });
         
@@ -36,7 +42,6 @@ app.use(cors({
             callback(null, true);
         } else {
             console.log('❌ CORS blocked for:', origin);
-            console.log('Allowed origins:', allowedOrigins);
             callback(new Error('CORS not allowed'));
         }
     },
@@ -48,12 +53,11 @@ app.use(cors({
         'X-Requested-With',
         'Accept',
         'Origin'
-    ],
-    exposedHeaders: ['Content-Type', 'Authorization']
+    ]
 }));
 
-// Handle preflight requests
-app.options('*', cors());
+// REMOVED the problematic line: app.options('*', cors());
+// The cors middleware above already handles OPTIONS preflight requests
 
 // Rest of your middleware
 app.use(express.json());
@@ -65,7 +69,7 @@ app.use(session({
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 60 * 60 * 1000 // 1 hour
+        maxAge: 60 * 60 * 1000
     }
 }));
 
@@ -104,7 +108,6 @@ app.use('/api/spotify', spotifyRoutes);
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
     try {
-        // Test database connection
         if (req.db) {
             await req.db.command({ ping: 1 });
         }
@@ -124,6 +127,14 @@ app.get('/api/health', async (req, res) => {
             database: 'disconnected'
         });
     }
+});
+
+// Handle 404 for undefined routes
+app.use('*', (req, res) => {
+    res.status(404).json({ 
+        success: false, 
+        message: `Route ${req.originalUrl} not found` 
+    });
 });
 
 // Error handling middleware
@@ -146,7 +157,7 @@ async function startServer() {
         
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
-            console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+            console.log(`📍 Health check: https://moodwave-backend-1.onrender.com/api/health`);
         });
     } catch (error) {
         console.error('❌ Failed to start server:', error);
