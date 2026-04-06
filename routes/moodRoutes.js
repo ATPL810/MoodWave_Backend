@@ -1,10 +1,11 @@
 const express = require('express');
 const { getDb } = require('../config/database');
 const { authMiddleware } = require('../middleware/authMiddleware');
+const { validateMoodInput } = require('../middleware/validation');
 const router = express.Router();
 
 // Save mood history
-router.post('/save', authMiddleware, async (req, res) => {
+router.post('/save', authMiddleware, validateMoodInput, async (req, res) => {
     try {
         const { mood, confidence, description } = req.body;
         const userId = req.user.userId;
@@ -14,7 +15,7 @@ router.post('/save', authMiddleware, async (req, res) => {
             userId,
             mood,
             confidence,
-            description,
+            description: description || '',
             createdAt: new Date()
         };
         
@@ -52,6 +53,30 @@ router.get('/history', authMiddleware, async (req, res) => {
     } catch (error) {
         console.error('Fetch mood history error:', error);
         res.status(500).json({ success: false, message: 'Failed to fetch mood history' });
+    }
+});
+
+// Get mood statistics
+router.get('/stats', authMiddleware, async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const db = getDb();
+        
+        const stats = await db.collection('mood_history').aggregate([
+            { $match: { userId } },
+            { $group: {
+                _id: '$mood',
+                count: { $sum: 1 },
+                avgConfidence: { $avg: '$confidence' }
+            }},
+            { $sort: { count: -1 } }
+        ]).toArray();
+        
+        res.json({ success: true, stats });
+        
+    } catch (error) {
+        console.error('Fetch mood stats error:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch statistics' });
     }
 });
 

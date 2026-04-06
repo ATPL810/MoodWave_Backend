@@ -1,25 +1,13 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const UserModel = require('../models/userModel');
+const { validateRegistration, validateLogin } = require('../middleware/validation');
 const router = express.Router();
 
-// Register endpoint
-router.post('/register', async (req, res) => {
+// Register endpoint with validation
+router.post('/register', validateRegistration, async (req, res) => {
     try {
-        const { username, email, password, confirmPassword } = req.body;
-        
-        // Validate input
-        if (!username || !email || !password || !confirmPassword) {
-            return res.status(400).json({ success: false, message: 'All fields are required' });
-        }
-        
-        if (password.length < 8) {
-            return res.status(400).json({ success: false, message: 'Password must be at least 8 characters' });
-        }
-        
-        if (password !== confirmPassword) {
-            return res.status(400).json({ success: false, message: 'Passwords do not match' });
-        }
+        const { username, email, password } = req.body;
         
         // Check if user exists
         const existingUser = await UserModel.findByUsername(username);
@@ -47,14 +35,10 @@ router.post('/register', async (req, res) => {
     }
 });
 
-// Login endpoint
-router.post('/login', async (req, res) => {
+// Login endpoint with validation
+router.post('/login', validateLogin, async (req, res) => {
     try {
         const { username, password } = req.body;
-        
-        if (!username || !password) {
-            return res.status(400).json({ success: false, message: 'Username and password required' });
-        }
         
         // Find user
         const user = await UserModel.findByUsername(username);
