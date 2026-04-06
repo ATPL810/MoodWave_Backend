@@ -1,5 +1,3 @@
-// server.js
-
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -16,13 +14,48 @@ const spotifyRoutes = require('./routes/spotifyRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+// ========== FIXED CORS CONFIGURATION ==========
+const allowedOrigins = [
+    process.env.FRONTEND_URL
+].filter(Boolean); // Remove undefined values
+
 app.use(cors({
-    origin: process.env.FRONTEND_URL,
+    origin: function(origin, callback) {
+        // Allow requests with no origin (like mobile apps, curl, etc)
+        if (!origin) return callback(null, true);
+        
+        // Check if origin is allowed
+        const isAllowed = allowedOrigins.some(allowed => {
+            if (!allowed) return false;
+            // Exact match or starts with (for subpaths)
+            return origin === allowed || origin.startsWith(allowed);
+        });
+        
+        if (isAllowed) {
+            console.log('✅ CORS allowed for:', origin);
+            callback(null, true);
+        } else {
+            console.log('❌ CORS blocked for:', origin);
+            console.log('Allowed origins:', allowedOrigins);
+            callback(new Error('CORS not allowed'));
+        }
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: [
+        'Content-Type', 
+        'Authorization', 
+        'X-Requested-With',
+        'Accept',
+        'Origin'
+    ],
+    exposedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Handle preflight requests
+app.options('*', cors());
+
+// Rest of your middleware
 app.use(express.json());
 app.use(cookieParser());
 app.use(session({
@@ -35,6 +68,12 @@ app.use(session({
         maxAge: 60 * 60 * 1000 // 1 hour
     }
 }));
+
+// Log all requests for debugging
+app.use((req, res, next) => {
+    console.log(`${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+    next();
+});
 
 // Database connection middleware
 let dbConnected = false;
@@ -66,12 +105,17 @@ app.use('/api/spotify', spotifyRoutes);
 app.get('/api/health', async (req, res) => {
     try {
         // Test database connection
-        await req.db.command({ ping: 1 });
+        if (req.db) {
+            await req.db.command({ ping: 1 });
+        }
         res.json({ 
             status: 'OK', 
             message: 'MoodWave backend is running',
             database: 'connected',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            cors: {
+                allowedOrigins: allowedOrigins
+            }
         });
     } catch (error) {
         res.status(500).json({ 
@@ -93,12 +137,12 @@ app.use((err, req, res, next) => {
     });
 });
 
-// Start server with database connection
+// Start server
 async function startServer() {
     try {
-        // Connect to database before starting server
         await connectToDatabase();
         console.log('✅ Database connected successfully');
+        console.log('✅ CORS allowed origins:', allowedOrigins);
         
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
