@@ -14,90 +14,45 @@ const spotifyRoutes = require('./routes/spotifyRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// ========== FIXED CORS CONFIGURATION (NO '*' ROUTE) ==========
-const allowedOrigins = [
-    'http://localhost:5500',
-    'http://127.0.0.1:5500',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'https://atp1810.github.io',
-    'https://atp1810.github.io',
-    process.env.FRONTEND_URL
-].filter(Boolean);
-
-// CORS middleware - handles both preflight and actual requests
+// ========== SIMPLE CORS CONFIGURATION (NO COMPLEX PATTERNS) ==========
 app.use(cors({
-    origin: function(origin, callback) {
-        // Allow requests with no origin (like mobile apps, curl, etc)
-        if (!origin) return callback(null, true);
-        
-        // Check if origin is allowed
-        const isAllowed = allowedOrigins.some(allowed => {
-            if (!allowed) return false;
-            return origin === allowed || origin.startsWith(allowed);
-        });
-        
-        if (isAllowed) {
-            console.log('✅ CORS allowed for:', origin);
-            callback(null, true);
-        } else {
-            console.log('❌ CORS blocked for:', origin);
-            callback(new Error('CORS not allowed'));
-        }
-    },
+    origin: true,  // This allows any origin temporarily - we'll restrict later
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: [
-        'Content-Type', 
-        'Authorization', 
-        'X-Requested-With',
-        'Accept',
-        'Origin'
-    ]
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// REMOVED the problematic line: app.options('*', cors());
-// The cors middleware above already handles OPTIONS preflight requests
-
-// Rest of your middleware
+// Basic middleware
 app.use(express.json());
 app.use(cookieParser());
 app.use(session({
-    secret: process.env.SESSION_SECRET,
+    secret: process.env.SESSION_SECRET || 'moodwave-secret-key',
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: process.env.NODE_ENV === 'production',
+        secure: false,  // Set to true only if using HTTPS
         httpOnly: true,
         maxAge: 60 * 60 * 1000
     }
 }));
 
-// Log all requests for debugging
+// Simple request logger
 app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url} - Origin: ${req.headers.origin}`);
+    console.log(`${req.method} ${req.url}`);
     next();
 });
 
 // Database connection middleware
-let dbConnected = false;
-
 app.use(async (req, res, next) => {
-    if (!dbConnected) {
-        try {
-            const db = await connectToDatabase();
-            req.db = db;
-            dbConnected = true;
-        } catch (error) {
-            console.error('Database connection failed:', error);
-            return res.status(500).json({ 
-                success: false, 
-                message: 'Database connection failed. Please try again later.' 
-            });
+    try {
+        if (!req.db) {
+            req.db = await connectToDatabase();
         }
+        next();
+    } catch (error) {
+        console.error('Database error:', error);
+        res.status(500).json({ success: false, message: 'Database connection error' });
     }
-    req.db = getDb();
-    next();
 });
 
 // Routes
@@ -105,46 +60,42 @@ app.use('/api/auth', authRoutes);
 app.use('/api/mood', moodRoutes);
 app.use('/api/spotify', spotifyRoutes);
 
-// Health check endpoint
-app.get('/api/health', async (req, res) => {
-    try {
-        if (req.db) {
-            await req.db.command({ ping: 1 });
-        }
-        res.json({ 
-            status: 'OK', 
-            message: 'MoodWave backend is running',
-            database: 'connected',
-            timestamp: new Date().toISOString(),
-            cors: {
-                allowedOrigins: allowedOrigins
-            }
-        });
-    } catch (error) {
-        res.status(500).json({ 
-            status: 'ERROR', 
-            message: 'Database connection issue',
-            database: 'disconnected'
-        });
-    }
-});
-
-// Handle 404 for undefined routes
-app.use('*', (req, res) => {
-    res.status(404).json({ 
-        success: false, 
-        message: `Route ${req.originalUrl} not found` 
+// Health check
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'OK', 
+        message: 'MoodWave backend is running',
+        timestamp: new Date().toISOString()
     });
 });
 
-// Error handling middleware
+// Root endpoint
+app.get('/', (req, res) => {
+    res.json({ 
+        message: 'MoodWave API is running',
+        endpoints: {
+            health: '/api/health',
+            auth: '/api/auth',
+            mood: '/api/mood',
+            spotify: '/api/spotify'
+        }
+    });
+});
+
+// 404 handler - MUST be after all routes
+app.use((req, res) => {
+    res.status(404).json({ 
+        success: false, 
+        message: `Route ${req.method} ${req.url} not found` 
+    });
+});
+
+// Error handler
 app.use((err, req, res, next) => {
-    console.error('Server error:', err.stack);
+    console.error('Error:', err.message);
     res.status(500).json({ 
         success: false, 
-        message: process.env.NODE_ENV === 'production' 
-            ? 'Something went wrong!' 
-            : err.message 
+        message: process.env.NODE_ENV === 'production' ? 'Server error' : err.message 
     });
 });
 
@@ -152,15 +103,13 @@ app.use((err, req, res, next) => {
 async function startServer() {
     try {
         await connectToDatabase();
-        console.log('✅ Database connected successfully');
-        console.log('✅ CORS allowed origins:', allowedOrigins);
+        console.log('✅ Database connected');
         
-        app.listen(PORT, () => {
-            console.log(`🚀 Server running on port ${PORT}`);
-            console.log(`📍 Health check: https://moodwave-backend-1.onrender.com/api/health`);
+        app.listen(PORT, '0.0.0.0', () => {
+            console.log(` Server running on port ${PORT}`);
         });
     } catch (error) {
-        console.error('❌ Failed to start server:', error);
+        console.error('❌ Failed to start:', error.message);
         process.exit(1);
     }
 }
