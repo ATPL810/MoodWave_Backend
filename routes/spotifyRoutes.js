@@ -100,6 +100,36 @@ router.post('/search', authMiddleware, async (req, res) => {
     }
 });
 
+// Get track preview by name and artist
+router.get('/track-preview/:trackName/:artistName', authMiddleware, async (req, res) => {
+    try {
+        const { trackName, artistName } = req.params;
+        const accessToken = await getSpotifyToken();
+        
+        // Search for the track
+        const searchQuery = `${decodeURIComponent(trackName)} ${decodeURIComponent(artistName)}`;
+        const response = await axios.get('https://api.spotify.com/v1/search', {
+            headers: { 'Authorization': `Bearer ${accessToken}` },
+            params: {
+                q: searchQuery,
+                type: 'track',
+                limit: 1,
+                market: 'US'
+            }
+        });
+        
+        const track = response.data.tracks.items[0];
+        if (track && track.preview_url) {
+            res.json({ success: true, previewUrl: track.preview_url });
+        } else {
+            res.json({ success: false, message: 'No preview available' });
+        }
+    } catch (error) {
+        console.error('Track preview error:', error);
+        res.json({ success: false, message: 'Failed to fetch preview' });
+    }
+});
+
 function getColorForMood(mood) {
     const colors = {
         'Happy': '#FFD700',
