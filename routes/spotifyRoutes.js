@@ -8,14 +8,17 @@ let spotifyToken = null;
 let tokenExpiry = null;
 
 async function getSpotifyToken() {
-    // Check if cached token is still valid
+    // Check cache
     if (spotifyToken && tokenExpiry && Date.now() < tokenExpiry) {
+        console.log('Using cached Spotify token');
         return spotifyToken;
     }
     
     try {
         const clientId = process.env.SPOTIFY_CLIENT_ID;
         const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+        
+        console.log('Fetching new Spotify token...');
         
         const authString = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
         
@@ -33,8 +36,9 @@ async function getSpotifyToken() {
         spotifyToken = response.data.access_token;
         tokenExpiry = Date.now() + (response.data.expires_in * 1000) - 60000;
         
-        console.log('✅ Spotify token obtained');
+        console.log('✅ Spotify token obtained successfully');
         return spotifyToken;
+        
     } catch (error) {
         console.error('Spotify token error:', error.response?.data || error.message);
         throw new Error('Failed to get Spotify token');
@@ -46,42 +50,32 @@ router.post('/recommendations', authMiddleware, async (req, res) => {
     try {
         const { mood, confidence, limit = 12 } = req.body;
         
-        // Map mood to seed genres and audio features
-        const moodConfig = {
-            'Happy': { genres: ['pop', 'dance'], target_valence: 0.8, target_energy: 0.7 },
-            'Sad': { genres: ['acoustic', 'piano'], target_valence: 0.2, target_energy: 0.3 },
-            'Energetic': { genres: ['edm', 'rock'], target_energy: 0.9, target_valence: 0.6 },
-            'Calm': { genres: ['chill', 'ambient'], target_energy: 0.2, target_valence: 0.5 },
-            'Stressed': { genres: ['meditation', 'classical'], target_energy: 0.3, target_valence: 0.4 },
-            'Neutral': { genres: ['pop', 'indie'], target_valence: 0.5, target_energy: 0.5 }
+        console.log(`Fetching recommendations for mood: ${mood}`);
+        
+        // Map mood to seed genres
+        const moodGenres = {
+            'Happy': ['pop', 'dance', 'happy'],
+            'Sad': ['acoustic', 'piano', 'sad'],
+            'Energetic': ['edm', 'rock', 'work-out'],
+            'Calm': ['chill', 'ambient', 'study'],
+            'Stressed': ['meditation', 'classical', 'ambient'],
+            'Neutral': ['pop', 'indie', 'alternative']
         };
         
-        const config = moodConfig[mood] || moodConfig.Neutral;
-        const seedGenres = config.genres.slice(0, 2).join(',');
+        const genres = moodGenres[mood] || moodGenres.Neutral;
+        const seedGenres = genres.slice(0, 2).join(',');
         
         const token = await getSpotifyToken();
         
-        const params = {
-            seed_genres: seedGenres,
-            limit: Math.min(limit, 20),
-            market: 'US'
-        };
-        
-        if (config.target_valence) params.target_valence = config.target_valence;
-        if (config.target_energy) params.target_energy = config.target_energy;
-        
-        // Adjust based on confidence
-        if (confidence) {
-            const adjustment = (confidence - 50) / 100;
-            if (params.target_valence) {
-                params.min_valence = Math.max(0, params.target_valence - 0.2);
-                params.max_valence = Math.min(1, params.target_valence + 0.2);
-            }
-        }
-        
         const response = await axios.get('https://api.spotify.com/v1/recommendations', {
-            headers: { 'Authorization': `Bearer ${token}` },
-            params: params
+            headers: {
+                'Authorization': `Bearer ${token}`
+            },
+            params: {
+                seed_genres: seedGenres,
+                limit: Math.min(limit, 20),
+                market: 'US'
+            }
         });
         
         const tracks = response.data.tracks.map(track => ({
@@ -91,20 +85,21 @@ router.post('/recommendations', authMiddleware, async (req, res) => {
             previewUrl: track.preview_url,
             spotifyUrl: track.external_urls.spotify,
             albumArt: track.album.images[0]?.url || '',
+            popularity: track.popularity,
             color: getColorForMood(mood)
         }));
         
-        console.log(`✅ Found ${tracks.length} tracks for mood: ${mood}`);
+        console.log(`✅ Found ${tracks.length} Spotify tracks for ${mood}`);
         res.json({ success: true, tracks });
         
     } catch (error) {
-        console.error('Recommendations error:', error.response?.data || error.message);
+        console.error('Spotify API error:', error.response?.data || error.message);
         // Return empty array instead of error
-        res.json({ success: false, tracks: [], message: 'Could not fetch recommendations' });
+        res.json({ success: false, tracks: [], message: 'Spotify temporarily unavailable' });
     }
 });
 
-// Search endpoint
+// Search endpoint as fallback
 router.post('/search', authMiddleware, async (req, res) => {
     try {
         const { query, limit = 12 } = req.body;
@@ -112,7 +107,7 @@ router.post('/search', authMiddleware, async (req, res) => {
         
         const response = await axios.get('https://api.spotify.com/v1/search', {
             headers: { 'Authorization': `Bearer ${token}` },
-            params: { q: query, type: 'track', limit: limit, market: 'US' }
+            params: { q: query, type: 'track', limit, market: 'US' }
         });
         
         const tracks = response.data.tracks.items.map(track => ({
