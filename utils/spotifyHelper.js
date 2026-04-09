@@ -4,7 +4,6 @@ let cachedToken = null;
 let tokenExpiry = null;
 
 async function getSpotifyToken() {
-    // Check if token is still valid
     if (cachedToken && tokenExpiry && Date.now() < tokenExpiry) {
         return cachedToken;
     }
@@ -27,12 +26,11 @@ async function getSpotifyToken() {
         );
         
         cachedToken = response.data.access_token;
-        tokenExpiry = Date.now() + (response.data.expires_in * 1000) - 60000; // Expire 1 minute early
+        tokenExpiry = Date.now() + (response.data.expires_in * 1000) - 60000;
         
         return cachedToken;
-        
     } catch (error) {
-        console.error('Failed to get Spotify token:', error.response?.data || error.message);
+        console.error('Spotify token error:', error.response?.data || error.message);
         throw error;
     }
 }

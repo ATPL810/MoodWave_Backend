@@ -1,53 +1,86 @@
-// routes/spotifyRoutes.js
 const express = require('express');
 const axios = require('axios');
 const { authMiddleware } = require('../middleware/authMiddleware');
-const { getSpotifyToken } = require('../utils/spotifyHelper');
 const router = express.Router();
 
-// Get recommendations based on mood with dynamic audio features
+// Spotify token cache
+let spotifyToken = null;
+let tokenExpiry = null;
+
+async function getSpotifyToken() {
+    // Check if cached token is still valid
+    if (spotifyToken && tokenExpiry && Date.now() < tokenExpiry) {
+        return spotifyToken;
+    }
+    
+    try {
+        const clientId = process.env.SPOTIFY_CLIENT_ID;
+        const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
+        
+        const authString = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+        
+        const response = await axios.post(
+            'https://accounts.spotify.com/api/token',
+            'grant_type=client_credentials',
+            {
+                headers: {
+                    'Authorization': `Basic ${authString}`,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            }
+        );
+        
+        spotifyToken = response.data.access_token;
+        tokenExpiry = Date.now() + (response.data.expires_in * 1000) - 60000;
+        
+        console.log('✅ Spotify token obtained');
+        return spotifyToken;
+    } catch (error) {
+        console.error('Spotify token error:', error.response?.data || error.message);
+        throw new Error('Failed to get Spotify token');
+    }
+}
+
+// Recommendations endpoint
 router.post('/recommendations', authMiddleware, async (req, res) => {
     try {
-        const { mood, confidence, target_valence, target_energy, target_danceability, limit = 12 } = req.body;
+        const { mood, confidence, limit = 12 } = req.body;
         
-        const accessToken = await getSpotifyToken();
-        
-        // Map mood to seed genres
-        const moodGenres = {
-            'Happy': ['pop', 'dance', 'happy'],
-            'Sad': ['acoustic', 'sad', 'piano'],
-            'Energetic': ['edm', 'rock', 'work-out'],
-            'Calm': ['chill', 'ambient', 'study'],
-            'Stressed': ['meditation', 'ambient', 'classical'],
-            'Neutral': ['pop', 'indie', 'alternative']
+        // Map mood to seed genres and audio features
+        const moodConfig = {
+            'Happy': { genres: ['pop', 'dance'], target_valence: 0.8, target_energy: 0.7 },
+            'Sad': { genres: ['acoustic', 'piano'], target_valence: 0.2, target_energy: 0.3 },
+            'Energetic': { genres: ['edm', 'rock'], target_energy: 0.9, target_valence: 0.6 },
+            'Calm': { genres: ['chill', 'ambient'], target_energy: 0.2, target_valence: 0.5 },
+            'Stressed': { genres: ['meditation', 'classical'], target_energy: 0.3, target_valence: 0.4 },
+            'Neutral': { genres: ['pop', 'indie'], target_valence: 0.5, target_energy: 0.5 }
         };
         
-        const genres = moodGenres[mood] || moodGenres.Neutral;
-        const seedGenres = genres.slice(0, 2).join(',');
+        const config = moodConfig[mood] || moodConfig.Neutral;
+        const seedGenres = config.genres.slice(0, 2).join(',');
         
-        // Build params with dynamic audio features
+        const token = await getSpotifyToken();
+        
         const params = {
             seed_genres: seedGenres,
-            limit: Math.min(limit, 100),
+            limit: Math.min(limit, 20),
             market: 'US'
         };
         
-        // Add target audio features if provided
-        if (target_valence) params.target_valence = target_valence;
-        if (target_energy) params.target_energy = target_energy;
-        if (target_danceability) params.target_danceability = target_danceability;
+        if (config.target_valence) params.target_valence = config.target_valence;
+        if (config.target_energy) params.target_energy = config.target_energy;
         
-        // Add min/max based on confidence
+        // Adjust based on confidence
         if (confidence) {
-            const confidenceAdjustment = (confidence - 50) / 100;
-            if (target_valence) {
-                params.min_valence = Math.max(0, target_valence - 0.2 - confidenceAdjustment);
-                params.max_valence = Math.min(1, target_valence + 0.2 + confidenceAdjustment);
+            const adjustment = (confidence - 50) / 100;
+            if (params.target_valence) {
+                params.min_valence = Math.max(0, params.target_valence - 0.2);
+                params.max_valence = Math.min(1, params.target_valence + 0.2);
             }
         }
         
         const response = await axios.get('https://api.spotify.com/v1/recommendations', {
-            headers: { 'Authorization': `Bearer ${accessToken}` },
+            headers: { 'Authorization': `Bearer ${token}` },
             params: params
         });
         
@@ -55,29 +88,30 @@ router.post('/recommendations', authMiddleware, async (req, res) => {
             id: track.id,
             name: track.name,
             artist: track.artists[0].name,
-            albumArt: track.album.images[0]?.url || '',
             previewUrl: track.preview_url,
             spotifyUrl: track.external_urls.spotify,
-            popularity: track.popularity,
+            albumArt: track.album.images[0]?.url || '',
             color: getColorForMood(mood)
         }));
         
+        console.log(`✅ Found ${tracks.length} tracks for mood: ${mood}`);
         res.json({ success: true, tracks });
         
     } catch (error) {
-        console.error('Spotify recommendations error:', error.response?.data || error.message);
-        res.status(500).json({ success: false, message: 'Failed to fetch recommendations' });
+        console.error('Recommendations error:', error.response?.data || error.message);
+        // Return empty array instead of error
+        res.json({ success: false, tracks: [], message: 'Could not fetch recommendations' });
     }
 });
 
-// Search endpoint as fallback
+// Search endpoint
 router.post('/search', authMiddleware, async (req, res) => {
     try {
         const { query, limit = 12 } = req.body;
-        const accessToken = await getSpotifyToken();
+        const token = await getSpotifyToken();
         
         const response = await axios.get('https://api.spotify.com/v1/search', {
-            headers: { 'Authorization': `Bearer ${accessToken}` },
+            headers: { 'Authorization': `Bearer ${token}` },
             params: { q: query, type: 'track', limit: limit, market: 'US' }
         });
         
@@ -85,48 +119,16 @@ router.post('/search', authMiddleware, async (req, res) => {
             id: track.id,
             name: track.name,
             artist: track.artists[0].name,
-            albumArt: track.album.images[0]?.url || '',
             previewUrl: track.preview_url,
             spotifyUrl: track.external_urls.spotify,
-            popularity: track.popularity,
+            albumArt: track.album.images[0]?.url || '',
             color: '#667eea'
         }));
         
         res.json({ success: true, tracks });
-        
     } catch (error) {
-        console.error('Spotify search error:', error.response?.data || error.message);
-        res.status(500).json({ success: false, message: 'Failed to search tracks' });
-    }
-});
-
-// Get track preview by name and artist
-router.get('/track-preview/:trackName/:artistName', authMiddleware, async (req, res) => {
-    try {
-        const { trackName, artistName } = req.params;
-        const accessToken = await getSpotifyToken();
-        
-        // Search for the track
-        const searchQuery = `${decodeURIComponent(trackName)} ${decodeURIComponent(artistName)}`;
-        const response = await axios.get('https://api.spotify.com/v1/search', {
-            headers: { 'Authorization': `Bearer ${accessToken}` },
-            params: {
-                q: searchQuery,
-                type: 'track',
-                limit: 1,
-                market: 'US'
-            }
-        });
-        
-        const track = response.data.tracks.items[0];
-        if (track && track.preview_url) {
-            res.json({ success: true, previewUrl: track.preview_url });
-        } else {
-            res.json({ success: false, message: 'No preview available' });
-        }
-    } catch (error) {
-        console.error('Track preview error:', error);
-        res.json({ success: false, message: 'Failed to fetch preview' });
+        console.error('Search error:', error.message);
+        res.json({ success: false, tracks: [] });
     }
 });
 

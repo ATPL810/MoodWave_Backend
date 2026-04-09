@@ -14,35 +14,24 @@ const spotifyRoutes = require('./routes/spotifyRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// ========== SIMPLE CORS CONFIGURATION (NO COMPLEX PATTERNS) ==========
+// CORS - Allow your frontend
 app.use(cors({
-    origin: true,  // This allows any origin temporarily - we'll restrict later
+    origin: ['https://atp1810.github.io', 'http://localhost:5500', 'http://127.0.0.1:5500'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Basic middleware
 app.use(express.json());
 app.use(cookieParser());
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'moodwave-secret-key',
+    secret: process.env.SESSION_SECRET || 'moodwave-secret',
     resave: false,
     saveUninitialized: false,
-    cookie: {
-        secure: false,  // Set to true only if using HTTPS
-        httpOnly: true,
-        maxAge: 60 * 60 * 1000
-    }
+    cookie: { maxAge: 60 * 60 * 1000 }
 }));
 
-// Simple request logger
-app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
-    next();
-});
-
-// Database connection middleware
+// Database connection
 app.use(async (req, res, next) => {
     try {
         if (!req.db) {
@@ -62,54 +51,29 @@ app.use('/api/spotify', spotifyRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'OK', 
-        message: 'MoodWave backend is running',
-        timestamp: new Date().toISOString()
-    });
+    res.json({ status: 'OK', message: 'MoodWave backend is running' });
 });
 
-// Root endpoint
-app.get('/', (req, res) => {
-    res.json({ 
-        message: 'MoodWave API is running',
-        endpoints: {
-            health: '/api/health',
-            auth: '/api/auth',
-            mood: '/api/mood',
-            spotify: '/api/spotify'
-        }
-    });
-});
-
-// 404 handler - MUST be after all routes
-app.use((req, res) => {
-    res.status(404).json({ 
-        success: false, 
-        message: `Route ${req.method} ${req.url} not found` 
-    });
+// 404 handler
+app.use('*', (req, res) => {
+    res.status(404).json({ success: false, message: 'Route not found' });
 });
 
 // Error handler
 app.use((err, req, res, next) => {
     console.error('Error:', err.message);
-    res.status(500).json({ 
-        success: false, 
-        message: process.env.NODE_ENV === 'production' ? 'Server error' : err.message 
-    });
+    res.status(500).json({ success: false, message: err.message || 'Server error' });
 });
 
-// Start server
 async function startServer() {
     try {
         await connectToDatabase();
         console.log('✅ Database connected');
-        
         app.listen(PORT, '0.0.0.0', () => {
-            console.log(` Server running on port ${PORT}`);
+            console.log(`🚀 Server running on port ${PORT}`);
         });
     } catch (error) {
-        console.error('❌ Failed to start:', error.message);
+        console.error('Failed to start:', error);
         process.exit(1);
     }
 }
