@@ -39,82 +39,111 @@ async function getSpotifyToken() {
     }
 }
 
-// Search tracks by mood keywords
+// Get recommendations based on mood and audio features
 router.post('/recommendations', authMiddleware, async (req, res) => {
     try {
-        const { mood, confidence, limit = 12 } = req.body;
+        const { mood, confidence, valence, energy, danceability } = req.body;
         
-        // Search queries for each mood
-        const searchQueries = {
-            'Happy': 'happy upbeat pop dance',
-            'Sad': 'sad emotional acoustic piano',
-            'Energetic': 'workout energetic rock edm',
-            'Calm': 'calm relaxing ambient peaceful',
-            'Stressed': 'meditation relaxing classical calm',
-            'Neutral': 'popular music hits'
+        // Map mood to audio features (valence = happiness, energy = intensity)
+        const moodFeatures = {
+            'Happy': { target_valence: 0.8, target_energy: 0.7, target_danceability: 0.7 },
+            'Sad': { target_valence: 0.2, target_energy: 0.3, target_danceability: 0.4 },
+            'Energetic': { target_valence: 0.6, target_energy: 0.9, target_danceability: 0.7 },
+            'Calm': { target_valence: 0.5, target_energy: 0.2, target_danceability: 0.3 },
+            'Stressed': { target_valence: 0.4, target_energy: 0.4, target_danceability: 0.5 },
+            'Neutral': { target_valence: 0.5, target_energy: 0.5, target_danceability: 0.5 }
         };
         
-        const query = searchQueries[mood] || searchQueries.Neutral;
+        const features = moodFeatures[mood] || moodFeatures.Neutral;
+        
+        // Adjust based on confidence score
+        const confidenceAdjustment = (confidence - 50) / 100;
+        const adjustedValence = Math.min(0.95, Math.max(0.05, features.target_valence + confidenceAdjustment * 0.2));
+        const adjustedEnergy = Math.min(0.95, Math.max(0.05, features.target_energy + confidenceAdjustment * 0.15));
+        
         const token = await getSpotifyToken();
         
-        // Search instead of recommendations (more reliable)
-        const response = await axios.get('https://api.spotify.com/v1/search', {
+        // Get recommendations with audio features
+        const response = await axios.get('https://api.spotify.com/v1/recommendations', {
             headers: { 'Authorization': `Bearer ${token}` },
             params: {
-                q: query,
-                type: 'track',
-                limit: limit,
+                seed_genres: getGenresForMood(mood),
+                target_valence: adjustedValence,
+                target_energy: adjustedEnergy,
+                target_danceability: features.target_danceability,
+                limit: 15,
                 market: 'US'
             }
         });
         
-        const tracks = response.data.tracks.items.map(track => ({
+        // Get audio features for each track
+        const trackIds = response.data.tracks.map(track => track.id).join(',');
+        const audioFeaturesResponse = await axios.get('https://api.spotify.com/v1/audio-features', {
+            headers: { 'Authorization': `Bearer ${token}` },
+            params: { ids: trackIds }
+        });
+        
+        const audioFeaturesMap = {};
+        audioFeaturesResponse.data.audio_features.forEach(feature => {
+            if (feature) {
+                audioFeaturesMap[feature.id] = {
+                    valence: feature.valence,
+                    energy: feature.energy,
+                    danceability: feature.danceability,
+                    tempo: feature.tempo,
+                    acousticness: feature.acousticness
+                };
+            }
+        });
+        
+        const tracks = response.data.tracks.map(track => ({
             id: track.id,
             name: track.name,
             artist: track.artists[0].name,
-            previewUrl: track.preview_url,
-            spotifyUrl: track.external_urls.spotify,
             albumArt: track.album.images[0]?.url || '',
-            popularity: track.popularity,
+            spotifyUri: track.uri,
+            previewUrl: track.preview_url,
+            externalUrl: track.external_urls.spotify,
+            audioFeatures: audioFeaturesMap[track.id] || null,
             color: getColorForMood(mood)
         }));
         
-        console.log(`✅ Found ${tracks.length} tracks for mood: ${mood}`);
+        console.log(`✅ Found ${tracks.length} tracks for mood: ${mood} (valence: ${adjustedValence}, energy: ${adjustedEnergy})`);
         res.json({ success: true, tracks });
         
     } catch (error) {
         console.error('Spotify error:', error.response?.data || error.message);
-        // Return mock tracks as last resort
-        const mockTracks = getMockTracks(req.body.mood);
-        res.json({ success: true, tracks: mockTracks, mock: true });
+        res.json({ success: false, tracks: [], error: error.message });
     }
 });
 
-function getMockTracks(mood) {
-    const mockData = {
-        'Happy': [
-            { id: '1', name: 'Happy', artist: 'Pharrell Williams', previewUrl: 'https://p.scdn.co/mp3-preview/1e6a5c6b8f9e4d2a8b7c6d5e4f3a2b1c', color: '#FFD700' },
-            { id: '2', name: 'Can\'t Stop The Feeling', artist: 'Justin Timberlake', color: '#FF6B6B' },
-            { id: '3', name: 'Uptown Funk', artist: 'Mark Ronson', color: '#4ECDC4' }
-        ],
-        'Sad': [
-            { id: '4', name: 'Someone Like You', artist: 'Adele', color: '#45B7D1' },
-            { id: '5', name: 'Fix You', artist: 'Coldplay', color: '#96CEB4' }
-        ],
-        'Energetic': [
-            { id: '6', name: 'Eye of the Tiger', artist: 'Survivor', color: '#FF6B6B' },
-            { id: '7', name: 'Stronger', artist: 'Kanye West', color: '#4ECDC4' }
-        ],
-        'Calm': [
-            { id: '8', name: 'Weightless', artist: 'Marconi Union', color: '#96CEB4' },
-            { id: '9', name: 'Clair de Lune', artist: 'Debussy', color: '#FFEAA7' }
-        ],
-        'Stressed': [
-            { id: '10', name: 'Here Comes The Sun', artist: 'The Beatles', color: '#4ECDC4' },
-            { id: '11', name: 'Three Little Birds', artist: 'Bob Marley', color: '#45B7D1' }
-        ]
+// Get audio features for a specific track
+router.get('/track-features/:trackId', authMiddleware, async (req, res) => {
+    try {
+        const { trackId } = req.params;
+        const token = await getSpotifyToken();
+        
+        const response = await axios.get(`https://api.spotify.com/v1/audio-features/${trackId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        res.json({ success: true, features: response.data });
+    } catch (error) {
+        console.error('Audio features error:', error.message);
+        res.json({ success: false, error: error.message });
+    }
+});
+
+function getGenresForMood(mood) {
+    const genres = {
+        'Happy': 'pop,dance',
+        'Sad': 'acoustic,piano',
+        'Energetic': 'edm,rock',
+        'Calm': 'chill,ambient',
+        'Stressed': 'classical,meditation',
+        'Neutral': 'pop,indie'
     };
-    return mockData[mood] || mockData.Happy;
+    return genres[mood] || 'pop';
 }
 
 function getColorForMood(mood) {
