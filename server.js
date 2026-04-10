@@ -3,7 +3,7 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const dotenv = require('dotenv');
-const { connectToDatabase, getDb } = require('./config/database');
+const { connectToDatabase } = require('./config/database');
 
 dotenv.config();
 
@@ -14,13 +14,12 @@ const spotifyRoutes = require('./routes/spotifyRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// COMPLETE CORS FIX - Allow all necessary origins
+// CORS configuration - NO WILDCARD '*' in app.options
 const allowedOrigins = [
     'https://atp1810.github.io',
     'https://atpl810.github.io',
     'http://localhost:5500',
-    'http://127.0.0.1:5500',
-    'https://moodwave-backend-4.onrender.com'
+    'http://127.0.0.1:5500'
 ];
 
 app.use(cors({
@@ -28,11 +27,13 @@ app.use(cors({
         // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
         
+        // Allow if origin is in allowed list or contains github.io
         if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('github.io')) {
             callback(null, true);
         } else {
             console.log('Blocked origin:', origin);
-            callback(null, true); // Temporarily allow all for testing
+            // Temporarily allow all for testing
+            callback(null, true);
         }
     },
     credentials: true,
@@ -41,8 +42,8 @@ app.use(cors({
     exposedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Handle preflight requests
-app.options('*', cors());
+// REMOVED the problematic line: app.options('*', cors());
+// The cors middleware above already handles OPTIONS preflight requests
 
 app.use(express.json());
 app.use(cookieParser());
@@ -59,7 +60,7 @@ app.use(session({
 
 // Logging middleware
 app.use((req, res, next) => {
-    console.log(`📝 ${req.method} ${req.url} - Origin: ${req.headers.origin || 'no origin'}`);
+    console.log(`📝 ${req.method} ${req.url}`);
     next();
 });
 
@@ -98,7 +99,7 @@ app.get('/', (req, res) => {
     });
 });
 
-// 404 handler
+// 404 handler - NO wildcard '*' here either
 app.use((req, res) => {
     res.status(404).json({ success: false, message: `Route ${req.method} ${req.url} not found` });
 });
