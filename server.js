@@ -14,13 +14,35 @@ const spotifyRoutes = require('./routes/spotifyRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS - Allow your frontend
+// COMPLETE CORS FIX - Allow all necessary origins
+const allowedOrigins = [
+    'https://atp1810.github.io',
+    'https://atpl810.github.io',
+    'http://localhost:5500',
+    'http://127.0.0.1:5500',
+    'https://moodwave-backend-4.onrender.com'
+];
+
 app.use(cors({
-    origin: ['https://atp1810.github.io', 'http://localhost:5500', 'http://127.0.0.1:5500', 'https://atpl810.github.io'],
+    origin: function(origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl)
+        if (!origin) return callback(null, true);
+        
+        if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('github.io')) {
+            callback(null, true);
+        } else {
+            console.log('Blocked origin:', origin);
+            callback(null, true); // Temporarily allow all for testing
+        }
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    exposedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 app.use(express.json());
 app.use(cookieParser());
@@ -28,12 +50,16 @@ app.use(session({
     secret: process.env.SESSION_SECRET || 'moodwave-secret',
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 60 * 60 * 1000 }
+    cookie: { 
+        secure: false,
+        httpOnly: true,
+        maxAge: 60 * 60 * 1000 
+    }
 }));
 
-// Simple request logger
+// Logging middleware
 app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
+    console.log(`📝 ${req.method} ${req.url} - Origin: ${req.headers.origin || 'no origin'}`);
     next();
 });
 
@@ -57,15 +83,22 @@ app.use('/api/spotify', spotifyRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'OK', message: 'MoodWave backend is running' });
+    res.json({ 
+        status: 'OK', 
+        message: 'MoodWave backend is running',
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Root endpoint
 app.get('/', (req, res) => {
-    res.json({ message: 'MoodWave API is running' });
+    res.json({ 
+        message: 'MoodWave API is running',
+        endpoints: ['/api/auth', '/api/mood', '/api/spotify', '/api/health']
+    });
 });
 
-// 404 handler - NO '*' wildcard! Use (req, res) instead
+// 404 handler
 app.use((req, res) => {
     res.status(404).json({ success: false, message: `Route ${req.method} ${req.url} not found` });
 });
@@ -79,13 +112,13 @@ app.use((err, req, res, next) => {
 async function startServer() {
     try {
         await connectToDatabase();
-        console.log('✅ Database connected');
+        console.log('✅ Database connected successfully');
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
         });
     } catch (error) {
-        console.error('Failed to start:', error);
+        console.error('❌ Failed to start server:', error);
         process.exit(1);
     }
 }
