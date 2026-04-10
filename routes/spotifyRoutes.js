@@ -39,76 +39,70 @@ async function getSpotifyToken() {
     }
 }
 
-// Get recommendations based on mood and audio features
+// Search tracks by mood
 router.post('/recommendations', authMiddleware, async (req, res) => {
     try {
-        const { mood, confidence, valence, energy, danceability } = req.body;
+        const { mood, confidence, limit = 12 } = req.body;
         
-        // Map mood to audio features (valence = happiness, energy = intensity)
-        const moodFeatures = {
-            'Happy': { target_valence: 0.8, target_energy: 0.7, target_danceability: 0.7 },
-            'Sad': { target_valence: 0.2, target_energy: 0.3, target_danceability: 0.4 },
-            'Energetic': { target_valence: 0.6, target_energy: 0.9, target_danceability: 0.7 },
-            'Calm': { target_valence: 0.5, target_energy: 0.2, target_danceability: 0.3 },
-            'Stressed': { target_valence: 0.4, target_energy: 0.4, target_danceability: 0.5 },
-            'Neutral': { target_valence: 0.5, target_energy: 0.5, target_danceability: 0.5 }
+        // Search queries for each mood
+        const searchQueries = {
+            'Happy': 'happy upbeat pop dance',
+            'Sad': 'sad emotional acoustic piano',
+            'Energetic': 'workout energetic rock edm',
+            'Calm': 'calm relaxing ambient peaceful',
+            'Stressed': 'meditation relaxing classical calm',
+            'Neutral': 'popular music hits'
         };
         
-        const features = moodFeatures[mood] || moodFeatures.Neutral;
-        
-        // Adjust based on confidence score
-        const confidenceAdjustment = (confidence - 50) / 100;
-        const adjustedValence = Math.min(0.95, Math.max(0.05, features.target_valence + confidenceAdjustment * 0.2));
-        const adjustedEnergy = Math.min(0.95, Math.max(0.05, features.target_energy + confidenceAdjustment * 0.15));
-        
+        const query = searchQueries[mood] || searchQueries.Neutral;
         const token = await getSpotifyToken();
         
-        // Get recommendations with audio features
-        const response = await axios.get('https://api.spotify.com/v1/recommendations', {
+        // Search for tracks
+        const response = await axios.get('https://api.spotify.com/v1/search', {
             headers: { 'Authorization': `Bearer ${token}` },
             params: {
-                seed_genres: getGenresForMood(mood),
-                target_valence: adjustedValence,
-                target_energy: adjustedEnergy,
-                target_danceability: features.target_danceability,
-                limit: 15,
+                q: query,
+                type: 'track',
+                limit: limit,
                 market: 'US'
             }
         });
         
         // Get audio features for each track
-        const trackIds = response.data.tracks.map(track => track.id).join(',');
-        const audioFeaturesResponse = await axios.get('https://api.spotify.com/v1/audio-features', {
-            headers: { 'Authorization': `Bearer ${token}` },
-            params: { ids: trackIds }
-        });
+        const trackIds = response.data.tracks.items.map(track => track.id).join(',');
+        let audioFeaturesMap = {};
         
-        const audioFeaturesMap = {};
-        audioFeaturesResponse.data.audio_features.forEach(feature => {
-            if (feature) {
-                audioFeaturesMap[feature.id] = {
-                    valence: feature.valence,
-                    energy: feature.energy,
-                    danceability: feature.danceability,
-                    tempo: feature.tempo,
-                    acousticness: feature.acousticness
-                };
-            }
-        });
+        if (trackIds) {
+            const featuresResponse = await axios.get('https://api.spotify.com/v1/audio-features', {
+                headers: { 'Authorization': `Bearer ${token}` },
+                params: { ids: trackIds }
+            });
+            
+            featuresResponse.data.audio_features.forEach(feature => {
+                if (feature) {
+                    audioFeaturesMap[feature.id] = {
+                        valence: feature.valence,
+                        energy: feature.energy,
+                        danceability: feature.danceability,
+                        tempo: feature.tempo
+                    };
+                }
+            });
+        }
         
-        const tracks = response.data.tracks.map(track => ({
+        const tracks = response.data.tracks.items.map(track => ({
             id: track.id,
             name: track.name,
             artist: track.artists[0].name,
             albumArt: track.album.images[0]?.url || '',
-            spotifyUri: track.uri,
             previewUrl: track.preview_url,
+            spotifyUri: track.uri,
             externalUrl: track.external_urls.spotify,
             audioFeatures: audioFeaturesMap[track.id] || null,
             color: getColorForMood(mood)
         }));
         
-        console.log(`✅ Found ${tracks.length} tracks for mood: ${mood} (valence: ${adjustedValence}, energy: ${adjustedEnergy})`);
+        console.log(`✅ Found ${tracks.length} Spotify tracks for mood: ${mood}`);
         res.json({ success: true, tracks });
         
     } catch (error) {
@@ -117,39 +111,31 @@ router.post('/recommendations', authMiddleware, async (req, res) => {
     }
 });
 
-// Get audio features for a specific track
-router.get('/track-features/:trackId', authMiddleware, async (req, res) => {
+// Get track by ID
+router.get('/track/:trackId', authMiddleware, async (req, res) => {
     try {
         const { trackId } = req.params;
         const token = await getSpotifyToken();
         
-        const response = await axios.get(`https://api.spotify.com/v1/audio-features/${trackId}`, {
+        const response = await axios.get(`https://api.spotify.com/v1/tracks/${trackId}`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         
-        res.json({ success: true, features: response.data });
+        res.json({ success: true, track: response.data });
     } catch (error) {
-        console.error('Audio features error:', error.message);
+        console.error('Track error:', error.message);
         res.json({ success: false, error: error.message });
     }
 });
 
-function getGenresForMood(mood) {
-    const genres = {
-        'Happy': 'pop,dance',
-        'Sad': 'acoustic,piano',
-        'Energetic': 'edm,rock',
-        'Calm': 'chill,ambient',
-        'Stressed': 'classical,meditation',
-        'Neutral': 'pop,indie'
-    };
-    return genres[mood] || 'pop';
-}
-
 function getColorForMood(mood) {
     const colors = {
-        'Happy': '#FFD700', 'Sad': '#45B7D1', 'Energetic': '#FF6B6B',
-        'Calm': '#96CEB4', 'Stressed': '#4ECDC4', 'Neutral': '#667eea'
+        'Happy': '#FFD700',
+        'Sad': '#45B7D1',
+        'Energetic': '#FF6B6B',
+        'Calm': '#96CEB4',
+        'Stressed': '#4ECDC4',
+        'Neutral': '#667eea'
     };
     return colors[mood] || '#667eea';
 }
