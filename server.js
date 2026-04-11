@@ -3,23 +3,22 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const dotenv = require('dotenv');
-const { connectToDatabase } = require('./config/database');
+const path = require('path');
 
 dotenv.config();
 
-const authRoutes = require('./routes/authRoutes');
-const moodRoutes = require('./routes/moodRoutes');
-const spotifyRoutes = require('./routes/spotifyRoutes');
+const { connectToDatabase, getDb } = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// CORS configuration - NO WILDCARD '*' in app.options
+// CORS configuration
 const allowedOrigins = [
-    'https://atp1810.github.io',
     'https://atpl810.github.io',
+    'https://atpl810.github.io/MoodWave',
     'http://localhost:5500',
-    'http://127.0.0.1:5500'
+    'http://127.0.0.1:5500',
+    'http://localhost:5000'
 ];
 
 app.use(cors({
@@ -27,13 +26,12 @@ app.use(cors({
         // Allow requests with no origin (like mobile apps or curl)
         if (!origin) return callback(null, true);
         
-        // Allow if origin is in allowed list or contains github.io
-        if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('github.io')) {
+        // Check if origin is allowed
+        if (allowedOrigins.includes(origin) || origin.includes('github.io')) {
             callback(null, true);
         } else {
             console.log('Blocked origin:', origin);
-            // Temporarily allow all for testing
-            callback(null, true);
+            callback(new Error('Not allowed by CORS'));
         }
     },
     credentials: true,
@@ -42,33 +40,31 @@ app.use(cors({
     exposedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// REMOVED the problematic line: app.options('*', cors());
-// The cors middleware above already handles OPTIONS preflight requests
-
 app.use(express.json());
 app.use(cookieParser());
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'moodwave-secret',
+    secret: process.env.SESSION_SECRET || 'moodwave_super_secret_key_2026',
     resave: false,
     saveUninitialized: false,
     cookie: { 
-        secure: false,
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 60 * 60 * 1000 
+        maxAge: 60 * 60 * 1000,
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
     }
 }));
 
 // Logging middleware
 app.use((req, res, next) => {
-    console.log(`📝 ${req.method} ${req.url}`);
+    console.log(`📝 ${req.method} ${req.url} - Origin: ${req.headers.origin || 'none'}`);
     next();
 });
 
 // Database connection middleware
 app.use(async (req, res, next) => {
     try {
-        if (!req.db) {
-            req.db = await connectToDatabase();
+        if (!getDb()) {
+            await connectToDatabase();
         }
         next();
     } catch (error) {
@@ -78,6 +74,10 @@ app.use(async (req, res, next) => {
 });
 
 // Routes
+const authRoutes = require('./routes/authRoutes');
+const moodRoutes = require('./routes/moodRoutes');
+const spotifyRoutes = require('./routes/spotifyRoutes');
+
 app.use('/api/auth', authRoutes);
 app.use('/api/mood', moodRoutes);
 app.use('/api/spotify', spotifyRoutes);
@@ -87,7 +87,8 @@ app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'OK', 
         message: 'MoodWave backend is running',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        env: process.env.NODE_ENV
     });
 });
 
@@ -99,7 +100,7 @@ app.get('/', (req, res) => {
     });
 });
 
-// 404 handler - NO wildcard '*' here either
+// 404 handler
 app.use((req, res) => {
     res.status(404).json({ success: false, message: `Route ${req.method} ${req.url} not found` });
 });
@@ -117,6 +118,7 @@ async function startServer() {
         app.listen(PORT, '0.0.0.0', () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+            console.log(`🌐 Allowed origins:`, allowedOrigins);
         });
     } catch (error) {
         console.error('❌ Failed to start server:', error);
@@ -125,3 +127,5 @@ async function startServer() {
 }
 
 startServer();
+
+module.exports = app;

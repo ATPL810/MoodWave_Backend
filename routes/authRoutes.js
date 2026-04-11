@@ -4,12 +4,11 @@ const UserModel = require('../models/userModel');
 const { validateRegistration, validateLogin } = require('../middleware/validation');
 const router = express.Router();
 
-// Register endpoint with validation
+// Register endpoint
 router.post('/register', validateRegistration, async (req, res) => {
     try {
         const { username, email, password } = req.body;
         
-        // Check if user exists
         const existingUser = await UserModel.findByUsername(username);
         if (existingUser) {
             return res.status(400).json({ success: false, message: 'Username already taken' });
@@ -20,7 +19,6 @@ router.post('/register', validateRegistration, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Email already registered' });
         }
         
-        // Create user
         const newUser = await UserModel.create({ username, email, password });
         
         res.status(201).json({ 
@@ -35,35 +33,30 @@ router.post('/register', validateRegistration, async (req, res) => {
     }
 });
 
-// Login endpoint with validation
+// Login endpoint
 router.post('/login', validateLogin, async (req, res) => {
     try {
         const { username, password } = req.body;
         
-        // Find user
         const user = await UserModel.findByUsername(username);
         if (!user) {
             return res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
         
-        // Verify password
         const isValid = await UserModel.verifyPassword(password, user.password);
         if (!isValid) {
             return res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
         
-        // Update last login
         await UserModel.updateLastLogin(user._id);
         
-        // Generate JWT token
         const token = jwt.sign(
-            { userId: user._id, username: user.username },
+            { userId: user._id.toString(), username: user.username },
             process.env.JWT_SECRET,
-            { expiresIn: process.env.JWT_EXPIRE }
+            { expiresIn: process.env.JWT_EXPIRE || '1h' }
         );
         
-        // Set session
-        req.session.userId = user._id;
+        req.session.userId = user._id.toString();
         req.session.username = user.username;
         
         res.json({
@@ -71,7 +64,7 @@ router.post('/login', validateLogin, async (req, res) => {
             message: 'Login successful',
             token,
             user: {
-                id: user._id,
+                id: user._id.toString(),
                 username: user.username,
                 email: user.email
             }
@@ -89,6 +82,7 @@ router.post('/logout', (req, res) => {
         if (err) {
             return res.status(500).json({ success: false, message: 'Logout failed' });
         }
+        res.clearCookie('connect.sid');
         res.json({ success: true, message: 'Logged out successfully' });
     });
 });

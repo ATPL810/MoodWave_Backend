@@ -4,7 +4,7 @@ function authMiddleware(req, res, next) {
     const token = req.headers.authorization?.split(' ')[1];
     
     if (!token) {
-        return res.status(401).json({ success: false, message: 'Access denied. No token provided.' });
+        return res.status(401).json({ success: false, message: 'No token provided' });
     }
     
     try {
@@ -13,9 +13,9 @@ function authMiddleware(req, res, next) {
         next();
     } catch (error) {
         if (error.name === 'TokenExpiredError') {
-            return res.status(401).json({ success: false, message: 'Session expired. Please login again.' });
+            return res.status(401).json({ success: false, message: 'Token expired' });
         }
-        return res.status(401).json({ success: false, message: 'Invalid token.' });
+        return res.status(401).json({ success: false, message: 'Invalid token' });
     }
 }
 
