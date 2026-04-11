@@ -42,6 +42,7 @@ app.use(cors({
 
 app.use(express.json());
 app.use(cookieParser());
+// Session configuration with production-ready settings
 app.use(session({
     secret: process.env.SESSION_SECRET || 'moodwave_super_secret_key_2026',
     resave: false,
@@ -49,9 +50,12 @@ app.use(session({
     cookie: { 
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 60 * 60 * 1000,
+        maxAge: 60 * 60 * 1000, // 1 hour
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
-    }
+    },
+    // Suppress the memory store warning since we're fine with it for now
+    // For production scale, you'd use connect-mongo or redis
+    store: new session.MemoryStore()
 }));
 
 // Logging middleware

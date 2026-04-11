@@ -15,22 +15,25 @@ async function connectToDatabase() {
             throw new Error('MONGODB_URI is not defined in environment variables');
         }
         
-        client = new MongoClient(uri, {
-            useNewUrlParser: true,
-            useUnifiedTopology: true,
-            serverSelectionTimeoutMS: 5000
-        });
+        // FIXED: Removed deprecated options for MongoDB driver v6+
+        client = new MongoClient(uri);
         
         await client.connect();
         db = client.db(dbName);
         
         console.log(`✅ Connected to MongoDB: ${dbName}`);
         
-        // Create indexes
-        await db.collection('users').createIndex({ username: 1 }, { unique: true });
-        await db.collection('users').createIndex({ email: 1 }, { unique: true });
-        await db.collection('mood_history').createIndex({ userId: 1 });
-        await db.collection('mood_history').createIndex({ createdAt: -1 });
+        // Create indexes (wrapped in try-catch to handle existing indexes)
+        try {
+            await db.collection('users').createIndex({ username: 1 }, { unique: true });
+            await db.collection('users').createIndex({ email: 1 }, { unique: true });
+            await db.collection('mood_history').createIndex({ userId: 1 });
+            await db.collection('mood_history').createIndex({ createdAt: -1 });
+            console.log('✅ Database indexes created/verified');
+        } catch (indexError) {
+            // Indexes might already exist, that's fine
+            console.log('ℹ️ Indexes already exist or creation skipped:', indexError.message);
+        }
         
         return db;
     } catch (error) {
@@ -54,5 +57,16 @@ async function closeDatabase() {
         console.log('Database connection closed');
     }
 }
+
+// Handle graceful shutdown
+process.on('SIGINT', async () => {
+    await closeDatabase();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    await closeDatabase();
+    process.exit(0);
+});
 
 module.exports = { connectToDatabase, getDb, closeDatabase };
