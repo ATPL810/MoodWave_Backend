@@ -7,7 +7,7 @@ const router = express.Router();
 // Save mood history
 router.post('/save', authMiddleware, validateMoodInput, async (req, res) => {
     try {
-        const { mood, confidence, description } = req.body;
+        const { mood, confidence, description, timezone, timestamp } = req.body;
         const userId = req.user.userId;
         
         const db = getDb();
@@ -16,7 +16,9 @@ router.post('/save', authMiddleware, validateMoodInput, async (req, res) => {
             mood,
             confidence,
             description: description || '',
-            createdAt: new Date()
+            timezone: timezone || 'Indian/Mauritius',
+            createdAt: timestamp ? new Date(timestamp) : new Date(),
+            clientTimestamp: timestamp
         };
         
         await db.collection('mood_history').insertOne(moodEntry);
