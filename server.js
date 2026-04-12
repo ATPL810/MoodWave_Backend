@@ -53,14 +53,14 @@ app.use(session({
         maxAge: 60 * 60 * 1000, // 1 hour
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
     },
-    // Suppress the memory store warning since we're fine with it for now
-    // For production scale, you'd use connect-mongo or redis
+    // Suppress the memory store warning since fine with it 
+    // For production scale,  use connect-mongo or redis
     store: new session.MemoryStore()
 }));
 
 // Logging middleware
 app.use((req, res, next) => {
-    console.log(`📝 ${req.method} ${req.url} - Origin: ${req.headers.origin || 'none'}`);
+    console.log(` ${req.method} ${req.url} - Origin: ${req.headers.origin || 'none'}`);
     next();
 });
 

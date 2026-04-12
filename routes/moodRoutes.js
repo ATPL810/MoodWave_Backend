@@ -16,7 +16,7 @@ router.post('/save', authMiddleware, validateMoodInput, async (req, res) => {
             mood,
             confidence,
             description: description || '',
-            createdAt: new Date()
+            createdAt: new Date() // This will store the ACTUAL server time
         };
         
         await db.collection('mood_history').insertOne(moodEntry);
@@ -44,7 +44,8 @@ router.get('/history', authMiddleware, async (req, res) => {
         res.json({ 
             success: true, 
             history: history.map(entry => ({
-                time: entry.createdAt.toLocaleTimeString(),
+                time: entry.createdAt, // Send the ACTUAL timestamp
+                createdAt: entry.createdAt, // Also send as createdAt for clarity
                 mood: entry.mood,
                 confidence: entry.confidence
             }))
